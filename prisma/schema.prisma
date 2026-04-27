@@ -1,0 +1,179 @@
+// =============================================================================
+// FILE: prisma/schema.prisma
+// PURPOSE:
+//   Defines every database table (called "models" in Prisma) for MisiMarket.
+//   This is the single source of truth for your database structure.
+//   Prisma reads this file to generate TypeScript types AND to create/update
+//   the actual tables in your PostgreSQL database.
+//
+// WHAT'S IN HERE:
+//   Restaurant  — the top-level tenant. Every piece of data belongs to a restaurant.
+//   User        — owner/manager/viewer accounts, each linked to one restaurant.
+//   Ingredient  — ingredient catalogue (basmati rice, chicken thighs, etc.)
+//   SupplierPrice — each supplier's price for an ingredient (multiple per ingredient).
+//   Dish        — menu items (Chicken Biryani, Chana Masala, etc.)
+//   DishIngredient — which ingredients (and how many oz) make up each dish.
+//   Invoice     — a scanned supplier invoice, stored with its file URL.
+//   InvoiceItem — individual line items on an invoice.
+//   Forecast    — ingredient price spike predictions with urgency levels.
+//
+// TO ACTIVATE:
+//   Step 1: Set DATABASE_URL in .env.local
+//           (get a free PostgreSQL DB from supabase.com or neon.tech)
+//   Step 2: Install Prisma:
+//           npm install prisma @prisma/client
+//   Step 3: Run the first migration (creates all tables in your DB):
+//           npx prisma migrate dev --name init
+//   Step 4: Generate the TypeScript client:
+//           npx prisma generate
+//   Step 5: Seed with demo data:
+//           npx prisma db seed
+//   Step 6: To view your DB visually in a browser:
+//           npx prisma studio
+//
+// LATER: When you change this file (add/rename a field), always run:
+//           npx prisma migrate dev --name describe-your-change
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Multi-tenant root ────────────────────────────────────────
+model Restaurant {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique // used in URL e.g. /dashboard/mamas-kitchen
+  createdAt   DateTime     @default(now())
+
+  users       User[]
+  ingredients Ingredient[]
+  dishes      Dish[]
+  invoices    Invoice[]
+  forecasts   Forecast[]
+}
+
+// ─── Users ───────────────────────────────────────────────────
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String?
+  passwordHash String
+  role         Role       @default(OWNER)
+  createdAt    DateTime   @default(now())
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId String
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  VIEWER
+}
+
+// ─── Ingredients & Supplier Prices ───────────────────────────
+model Ingredient {
+  id           String          @id @default(cuid())
+  name         String
+  category     String
+  createdAt    DateTime        @default(now())
+
+  restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId String
+
+  suppliers    SupplierPrice[]
+  dishItems    DishIngredient[]
+}
+
+model SupplierPrice {
+  id           String     @id @default(cuid())
+  supplier     String
+  type         String     // "national" | "local"
+  price        Float
+  unit         Float
+  unitType     String     // "kg" | "lb" | "oz" | "case" | "each"
+  pricePerOz   Float
+  inStock      Boolean    @default(true)
+  lastUpdated  DateTime   @default(now())
+
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  ingredientId String
+}
+
+// ─── Dishes & Profitability ───────────────────────────────────
+model Dish {
+  id           String           @id @default(cuid())
+  name         String
+  menuPrice    Float
+  createdAt    DateTime         @default(now())
+
+  restaurant   Restaurant       @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId String
+
+  ingredients  DishIngredient[]
+}
+
+model DishIngredient {
+  id           String     @id @default(cuid())
+  name         String
+  quantityOz   Float
+
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  ingredientId String
+
+  dish         Dish       @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  dishId       String
+}
+
+// ─── Invoices ─────────────────────────────────────────────────
+model Invoice {
+  id              String        @id @default(cuid())
+  supplier        String
+  fileUrl         String?       // stored in Supabase / S3
+  totalOvercharge Float         @default(0)
+  uploadedAt      DateTime      @default(now())
+
+  restaurant      Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId    String
+
+  lineItems       InvoiceItem[]
+}
+
+model InvoiceItem {
+  id            String  @id @default(cuid())
+  item          String
+  previousPrice Float
+  currentPrice  Float
+  quantity      Float
+  unit          String
+  diff          Float   // currentPrice - previousPrice
+
+  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId     String
+}
+
+// ─── Forecasts ────────────────────────────────────────────────
+model Forecast {
+  id                     String     @id @default(cuid())
+  ingredient             String
+  expectedRisePct        Float
+  reason                 String
+  recommendedStockMonths Int
+  urgency                Urgency
+  createdAt              DateTime   @default(now())
+
+  restaurant             Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantId           String
+}
+
+enum Urgency {
+  LOW
+  MEDIUM
+  HIGH
+}
