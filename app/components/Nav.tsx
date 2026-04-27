@@ -77,6 +77,8 @@ const NAV_LINKS = [
 export default function Nav() {
   const pathname = usePathname();
 
+  if (pathname === "/login" || pathname === "/register") return null;
+
   return (
     <nav
       style={{ backgroundColor: "var(--nav-bg)" }}
